@@ -1,0 +1,7 @@
+#!/bin/sh
+cat results/nose-stderr
+if tail -1 results/nose-stderr | grep 'OK'; then
+    exit 0
+else
+    exit 1
+fi

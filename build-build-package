@@ -1,0 +1,55 @@
+#!/bin/bash
+if [ -z "$CI_PROJECT_DIR" ]; then
+  echo "CI_PROJECT_DIR not set, aborting."
+  exit 1
+fi
+
+set -e 
+mkdir source
+mv ./* ./.git* source/ || true
+
+# Copy GitLab CI vars to Jenkins compatible names.
+export GIT_BRANCH="$CI_BUILD_REF_NAME"
+export BUILD_NUMBER="$CI_BUILD_ID"
+export GIT_COMMIT="$CI_BUILD_REF"
+export WORKSPACE="$CI_PROJECT_DIR"
+export JOB_NAME="$CI_BUILD_NAME-$CI_BUILD_STAGE"
+
+export JENKINS_DEBIAN_GLUE_QUIET=true
+export SKIP_GIT_CLEANUP=true
+
+branch=$(echo $GIT_BRANCH | sed -e 's!origin/!!; s!f/!!; s!u/!!; s!_!!g; s!-!!g;')
+if [ -z "$branch" ]; then
+  echo "Made branch is empty, aborting. Probably GIT_BRANCH was empty, too."
+  exit 1
+fi
+echo "Git branch is: $GIT_BRANCH, made branch: $branch"
+
+export DIST=${DIST:-jessie}
+export distribution=$DIST
+export COWBUILDER_DIST=$DIST
+export REPOS="$branch-$DIST"
+echo "Target distribution DIST: $DIST, target REPOS: $REPOS"
+
+# Turn off changelog walking, as we never tag, and then it's super slow.
+export DCH_LOG_RESTRICTION='--git-log=--grep=XXXHOPEFULLYNOMATCHEVERXXX'
+# Quiet warning about KEEP_SOURCE_CHANGES with DIST set.
+export KEEP_SOURCE_CHANGES=false
+
+generate-git-snapshot
+
+export PBUILDER_CONFIG=pbuilderrc
+cat > "$PBUILDER_CONFIG" <<EOF
+export USENETWORK=yes
+export LC_ALL="en_US.UTF-8" LANG="en_US.UTF-8"
+EOF
+
+# BUILD_ONLY can be given by a trigger.
+if [ -z "$BUILD_ONLY" ]; then
+  export SKIP_REMOVAL=true # do not remove any packages
+fi
+build-and-provide-package
+
+mkdir results && pushd results
+tar --strip-components=3 --wildcards -xvf ../autopkgtest.tar.gz "tmp/buildd/autopkgtest.out/*std*" || true
+popd
